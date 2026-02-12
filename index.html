@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ball Crasher Test</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: monospace;
+        }
+        canvas {
+            border: 2px solid #333;
+            cursor: crosshair;
+        }
+        #stats {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #0f0;
+            font-size: 16px;
+            text-shadow: 0 0 5px #000;
+        }
+        #watermark {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            color: rgba(255, 255, 255, 0.3);
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+            font-family: monospace;
+            pointer-events: none;
+            user-select: none;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #fff;
+            font-size: 14px;
+            text-shadow: 0 0 5px #000;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            transition: all 0.3s ease;
+        }
+        #controls.collapsed {
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.5);
+        }
+        #controls.collapsed .controls-content {
+            display: none;
+        }
+        #settingsIcon {
+            cursor: pointer;
+            font-size: 24px;
+            user-select: none;
+            text-align: center;
+        }
+        #settingsIcon:hover {
+            color: #3498db;
+        }
+        .controls-content {
+            margin-top: 10px;
+        }
+        #controls input[type="number"] {
+            width: 80px;
+            margin: 5px;
+            padding: 5px;
+            background: #333;
+            color: #0f0;
+            border: 1px solid #555;
+            border-radius: 4px;
+        }
+        #controls input[type="range"] {
+            width: 120px;
+        }
+        #controls input[type="checkbox"] {
+            margin: 5px;
+        }
+        #controls button {
+            margin: 5px;
+            padding: 8px 15px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: monospace;
+        }
+        #controls button:hover {
+            background: #2980b9;
+        }
+        #controls button.active {
+            background: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="stats"></div>
+    <div id="watermark">HoowyPlayz</div>
+    <div id="controls" class="collapsed">
+        <div id="settingsIcon">⚙️</div>
+        <div class="controls-content">
+            <div><strong>Auto-Spawn</strong></div>
+            <div>
+                <label>Interval (sec):</label><br>
+                <input type="number" id="spawnInterval" value="0.1" step="0.001" min="0.001" max="10">
+            </div>
+            <button id="toggleAutoSpawn">Start Auto-Spawn</button>
+            <br><br>
+            <div><strong>View Controls</strong></div>
+            <div>
+                <label>Zoom:</label><br>
+                <input type="range" id="zoomSlider" min="0.5" max="3" step="0.1" value="1">
+                <span id="zoomValue">100%</span>
+            </div>
+            <br>
+            <button id="toggleColorButton">Make All White</button>
+            <br><br>
+            <div><strong>Physics</strong></div>
+            <div>
+                <label>Wall Bounce Acceleration:</label><br>
+                <input type="number" id="accelInput" min="-100" max="10000" step="1" value="10" style="width: 100px;">
+                <span id="accelValue">% (1.10x)</span>
+            </div>
+            <div>
+                <label>
+                    <input type="checkbox" id="speedLimitToggle" checked>
+                    Speed Limit (2000 px/frame)
+                </label>
+            </div>
+            <div>
+                <label>
+                    <input type="checkbox" id="initialBallsToggle" checked>
+                    Spawn 20 Initial Balls
+                </label>
+            </div>
+            <br>
+            <button id="resetButton" style="background: #e74c3c;">Reset Simulation</button>
+        </div>
+    </div>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const stats = document.getElementById('stats');
+        const spawnIntervalInput = document.getElementById('spawnInterval');
+        const toggleButton = document.getElementById('toggleAutoSpawn');
+        const resetButton = document.getElementById('resetButton');
+        const zoomSlider = document.getElementById('zoomSlider');
+        const zoomValue = document.getElementById('zoomValue');
+        const toggleColorButton = document.getElementById('toggleColorButton');
+        const settingsIcon = document.getElementById('settingsIcon');
+        const controlsPanel = document.getElementById('controls');
+        const speedLimitToggle = document.getElementById('speedLimitToggle');
+        const accelInput = document.getElementById('accelInput');
+        const accelValue = document.getElementById('accelValue');
+        const initialBallsToggle = document.getElementById('initialBallsToggle');
+        
+        let autoSpawnEnabled = false;
+        let autoSpawnIntervalId = null;
+        let zoomLevel = 1;
+        let allWhiteMode = false;
+        let speedLimitEnabled = true;
+        let accelerationPercent = 10; // Default 10% = 1.1x multiplier
+        let hasExploded = false;
+        let explosionTime = 0;
+        let shakeIntensity = 0;
+        let containerIntact = true;
+        let countdownActive = false;
+        let countdownNumber = 3;
+        let simulationRunning = false;
+        let spawnInitialBalls = true;
+        let blackScreenActive = false;
+        
+        canvas.width = 800;
+        canvas.height = 800;
+        
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const containerRadius = 380;
+        
+        class Ball {
+            constructor(x, y, vx, vy, isUserSpawned = false) {
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.radius = 4;
+                this.mass = 1;
+                this.color = isUserSpawned ? '#ffffff' : '#3498db';
+                this.trail = [];
+                this.maxTrailLength = 30;
+            }
+            
+            update() {
+                // Don't update if simulation not running
+                if (!simulationRunning) return;
+                
+                // Add current position to trail
+                this.trail.push({x: this.x, y: this.y});
+                
+                // Limit trail length
+                if (this.trail.length > this.maxTrailLength) {
+                    this.trail.shift();
+                }
+                
+                // Cap maximum speed to prevent escaping (if enabled)
+                if (speedLimitEnabled) {
+                    const maxSpeed = 2000;
+                    const currentSpeed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+                    if (currentSpeed > maxSpeed) {
+                        const scale = maxSpeed / currentSpeed;
+                        this.vx *= scale;
+                        this.vy *= scale;
+                    }
+                }
+                
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // Check collision with circular container (only if container is intact)
+                const dx = this.x - centerX;
+                const dy = this.y - centerY;
+                const distFromCenter = Math.sqrt(dx * dx + dy * dy);
+                
+                if (containerIntact && distFromCenter + this.radius > containerRadius) {
+                    // Normalize the collision normal
+                    const nx = dx / distFromCenter;
+                    const ny = dy / distFromCenter;
+                    
+                    // Calculate multiplier from percentage: -100% = 0x, 0% = 1x, 100% = 2x, etc.
+                    const multiplier = 1 + (accelerationPercent / 100);
+                    
+                    // Reflect velocity with adjustable speed boost
+                    const dotProduct = this.vx * nx + this.vy * ny;
+                    this.vx = (this.vx - 2 * dotProduct * nx) * multiplier;
+                    this.vy = (this.vy - 2 * dotProduct * ny) * multiplier;
+                    
+                    // Move ball back inside - force it if it went too far
+                    const targetDist = containerRadius - this.radius - 1;
+                    this.x = centerX + nx * targetDist;
+                    this.y = centerY + ny * targetDist;
+                }
+            }
+            
+            drawTrail() {
+                if (this.trail.length < 2) return;
+                
+                ctx.beginPath();
+                ctx.moveTo(this.trail[0].x, this.trail[0].y);
+                
+                for (let i = 1; i < this.trail.length; i++) {
+                    ctx.lineTo(this.trail[i].x, this.trail[i].y);
+                }
+                
+                // Use the ball's color with transparency, or white if in all-white mode
+                if (allWhiteMode) {
+                    ctx.strokeStyle = `rgba(255, 255, 255, 0.3)`;
+                } else if (this.color === '#ffffff') {
+                    ctx.strokeStyle = `rgba(255, 255, 255, 0.3)`;
+                } else {
+                    ctx.strokeStyle = `rgba(52, 152, 219, 0.3)`; // Blue with alpha
+                }
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+            
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = allWhiteMode ? '#ffffff' : this.color;
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+        }
+        
+        const balls = [];
+        
+        // Function to initialize/reset balls
+        function initializeBalls() {
+            balls.length = 0; // Clear array
+            
+            // Reset explosion state
+            hasExploded = false;
+            containerIntact = true;
+            shakeIntensity = 0;
+            simulationRunning = false;
+            
+            // Spawn initial balls if enabled
+            if (spawnInitialBalls) {
+                for (let i = 0; i < 20; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = Math.random() * (containerRadius - 50);
+                    const x = centerX + Math.cos(angle) * distance;
+                    const y = centerY + Math.sin(angle) * distance;
+                    const vx = (Math.random() - 0.5) * 4;
+                    const vy = (Math.random() - 0.5) * 4;
+                    balls.push(new Ball(x, y, vx, vy, false));
+                }
+            }
+            
+            // Start countdown
+            startCountdown();
+        }
+        
+        // Countdown function
+        function startCountdown() {
+            blackScreenActive = true;
+            
+            // Black screen for 1 second
+            setTimeout(() => {
+                blackScreenActive = false;
+                countdownActive = true;
+                countdownNumber = 3;
+                
+                const countdownInterval = setInterval(() => {
+                    countdownNumber--;
+                    
+                    if (countdownNumber < 0) {
+                        clearInterval(countdownInterval);
+                        countdownActive = false;
+                        simulationRunning = true;
+                        
+                        // Restart auto-spawn if it was enabled before reset
+                        if (autoSpawnEnabled && !autoSpawnIntervalId) {
+                            const intervalMs = parseFloat(spawnIntervalInput.value) * 1000;
+                            autoSpawnIntervalId = setInterval(spawnRandomBall, intervalMs);
+                        }
+                    }
+                }, 1000);
+            }, 1000);
+        }
+        
+        // Initialize on load
+        initializeBalls();
+        
+        // Handle ball-to-ball collisions
+        function checkBallCollisions() {
+            for (let i = 0; i < balls.length; i++) {
+                for (let j = i + 1; j < balls.length; j++) {
+                    const ball1 = balls[i];
+                    const ball2 = balls[j];
+                    
+                    const dx = ball2.x - ball1.x;
+                    const dy = ball2.y - ball1.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (distance < ball1.radius + ball2.radius) {
+                        // Collision detected
+                        const nx = dx / distance;
+                        const ny = dy / distance;
+                        
+                        // Relative velocity
+                        const dvx = ball2.vx - ball1.vx;
+                        const dvy = ball2.vy - ball1.vy;
+                        const dotProduct = dvx * nx + dvy * ny;
+                        
+                        // Don't process if balls are separating
+                        if (dotProduct > 0) continue;
+                        
+                        // Elastic collision without energy boost (realistic physics)
+                        ball1.vx -= dotProduct * nx;
+                        ball1.vy -= dotProduct * ny;
+                        ball2.vx += dotProduct * nx;
+                        ball2.vy += dotProduct * ny;
+                        
+                        // Separate overlapping balls
+                        const overlap = (ball1.radius + ball2.radius - distance) / 2;
+                        ball1.x -= nx * overlap;
+                        ball1.y -= ny * overlap;
+                        ball2.x += nx * overlap;
+                        ball2.y += ny * overlap;
+                    }
+                }
+            }
+        }
+        
+        // Click to spawn new ball
+        canvas.addEventListener('click', (e) => {
+            // Don't spawn if exploded or simulation not running
+            if (hasExploded || !simulationRunning) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // Check if click is inside container
+            const dx = x - centerX;
+            const dy = y - centerY;
+            const distFromCenter = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distFromCenter < containerRadius - 10) {
+                const vx = (Math.random() - 0.5) * 6;
+                const vy = (Math.random() - 0.5) * 6;
+                balls.push(new Ball(x, y, vx, vy, true));
+            }
+        });
+        
+        // Function to spawn ball at random location
+        function spawnRandomBall() {
+            // Don't spawn if exploded or simulation not running
+            if (hasExploded || !simulationRunning) return;
+            
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * (containerRadius - 50);
+            const x = centerX + Math.cos(angle) * distance;
+            const y = centerY + Math.sin(angle) * distance;
+            const vx = (Math.random() - 0.5) * 6;
+            const vy = (Math.random() - 0.5) * 6;
+            balls.push(new Ball(x, y, vx, vy, true));
+        }
+        
+        // Trigger explosion when NaN is detected
+        function triggerExplosion() {
+            if (hasExploded) return;
+            
+            hasExploded = true;
+            containerIntact = false;
+            explosionTime = Date.now();
+            shakeIntensity = 20;
+            
+            // Stop auto-spawn
+            if (autoSpawnEnabled) {
+                autoSpawnEnabled = false;
+                toggleButton.textContent = 'Start Auto-Spawn';
+                toggleButton.classList.remove('active');
+                if (autoSpawnIntervalId) {
+                    clearInterval(autoSpawnIntervalId);
+                    autoSpawnIntervalId = null;
+                }
+            }
+            
+            // Give all balls explosive outward velocity
+            balls.forEach(ball => {
+                const angle = Math.atan2(ball.y - centerY, ball.x - centerX);
+                const explosionForce = 50;
+                ball.vx = Math.cos(angle) * explosionForce;
+                ball.vy = Math.sin(angle) * explosionForce;
+            });
+        }
+        
+        // Toggle auto-spawn
+        toggleButton.addEventListener('click', () => {
+            autoSpawnEnabled = !autoSpawnEnabled;
+            
+            if (autoSpawnEnabled) {
+                toggleButton.textContent = 'Stop Auto-Spawn';
+                toggleButton.classList.add('active');
+                
+                const intervalMs = parseFloat(spawnIntervalInput.value) * 1000;
+                autoSpawnIntervalId = setInterval(spawnRandomBall, intervalMs);
+            } else {
+                toggleButton.textContent = 'Start Auto-Spawn';
+                toggleButton.classList.remove('active');
+                
+                if (autoSpawnIntervalId) {
+                    clearInterval(autoSpawnIntervalId);
+                    autoSpawnIntervalId = null;
+                }
+            }
+        });
+        
+        // Update interval when input changes (if auto-spawn is active)
+        spawnIntervalInput.addEventListener('change', () => {
+            if (autoSpawnEnabled) {
+                clearInterval(autoSpawnIntervalId);
+                const intervalMs = parseFloat(spawnIntervalInput.value) * 1000;
+                autoSpawnIntervalId = setInterval(spawnRandomBall, intervalMs);
+            }
+        });
+        
+        // Reset button
+        resetButton.addEventListener('click', () => {
+            // Clear auto-spawn interval but keep it enabled for after countdown
+            if (autoSpawnIntervalId) {
+                clearInterval(autoSpawnIntervalId);
+                autoSpawnIntervalId = null;
+            }
+            
+            // Regenerate initial balls
+            initializeBalls();
+        });
+        
+        // Zoom slider
+        zoomSlider.addEventListener('input', () => {
+            zoomLevel = parseFloat(zoomSlider.value);
+            zoomValue.textContent = Math.round(zoomLevel * 100) + '%';
+        });
+        
+        // Color toggle button
+        toggleColorButton.addEventListener('click', () => {
+            allWhiteMode = !allWhiteMode;
+            toggleColorButton.textContent = allWhiteMode ? 'Make Blue/White' : 'Make All White';
+        });
+        
+        // Settings panel toggle
+        settingsIcon.addEventListener('click', () => {
+            controlsPanel.classList.toggle('collapsed');
+        });
+        
+        // Speed limit toggle
+        speedLimitToggle.addEventListener('change', () => {
+            speedLimitEnabled = speedLimitToggle.checked;
+        });
+        
+        // Acceleration input
+        accelInput.addEventListener('input', () => {
+            accelerationPercent = parseFloat(accelInput.value) || 0;
+            const multiplier = 1 + (accelerationPercent / 100);
+            accelValue.textContent = `% (${multiplier.toFixed(2)}x)`;
+        });
+        
+        // Initial balls toggle
+        initialBallsToggle.addEventListener('change', () => {
+            spawnInitialBalls = initialBallsToggle.checked;
+        });
+        
+        function animate() {
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Apply zoom transformation with shake effect
+            ctx.save();
+            
+            // Screen shake
+            let shakeX = 0;
+            let shakeY = 0;
+            if (shakeIntensity > 0) {
+                shakeX = (Math.random() - 0.5) * shakeIntensity;
+                shakeY = (Math.random() - 0.5) * shakeIntensity;
+                shakeIntensity *= 0.95; // Decay shake
+            }
+            
+            ctx.translate(canvas.width / 2 + shakeX, canvas.height / 2 + shakeY);
+            ctx.scale(zoomLevel, zoomLevel);
+            ctx.translate(-canvas.width / 2, -canvas.height / 2);
+            
+            // Draw container circle (with explosion effect)
+            if (containerIntact) {
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, containerRadius, 0, Math.PI * 2);
+                ctx.strokeStyle = '#444';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            } else {
+                // Draw exploding container fragments
+                const timeSinceExplosion = Date.now() - explosionTime;
+                const fragmentCount = 40;
+                for (let i = 0; i < fragmentCount; i++) {
+                    const angle = (i / fragmentCount) * Math.PI * 2;
+                    const expansionSpeed = 5;
+                    const fragmentDist = containerRadius + (timeSinceExplosion * expansionSpeed / 10);
+                    const x = centerX + Math.cos(angle) * fragmentDist;
+                    const y = centerY + Math.sin(angle) * fragmentDist;
+                    const opacity = Math.max(0, 1 - timeSinceExplosion / 2000);
+                    
+                    ctx.beginPath();
+                    ctx.arc(x, y, 5, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(255, 50, 50, ${opacity})`;
+                    ctx.fill();
+                }
+            }
+            
+            // Draw trails first (so they appear behind balls)
+            balls.forEach(ball => {
+                ball.drawTrail();
+            });
+            
+            // Update and draw balls
+            balls.forEach(ball => {
+                ball.update();
+                ball.draw();
+            });
+            
+            // Draw countdown overlay
+            if (blackScreenActive) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            } else if (countdownActive) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                if (countdownNumber > 0) {
+                    ctx.fillStyle = '#00ff00';
+                    ctx.font = 'bold 200px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(countdownNumber.toString(), centerX, centerY);
+                } else {
+                    ctx.fillStyle = '#ffff00';
+                    ctx.font = 'bold 100px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('GO!', centerX, centerY);
+                }
+            }
+            
+            ctx.restore();
+            
+            // Check collisions (only if simulation running)
+            if (simulationRunning) {
+                checkBallCollisions();
+            }
+            
+            // Calculate max speed and check for NaN
+            let maxSpeed = 0;
+            let hasNaN = false;
+            balls.forEach(ball => {
+                const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+                if (isNaN(speed) || isNaN(ball.x) || isNaN(ball.y)) {
+                    hasNaN = true;
+                }
+                maxSpeed = Math.max(maxSpeed, speed);
+            });
+            
+            // Trigger explosion if NaN detected
+            if (hasNaN && !hasExploded) {
+                triggerExplosion();
+            }
+            
+            // Update stats
+            let statusText = `
+                Balls: ${balls.length}<br>
+                Max Speed: ${maxSpeed.toFixed(2)}<br>
+                FPS: ~${Math.round(1000/16)}<br>
+            `;
+            
+            if (!hasExploded) {
+                statusText += `<span style="color: #ff6b6b">⚠ Click to spawn more!</span>`;
+            }
+            
+            stats.innerHTML = statusText;
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>
